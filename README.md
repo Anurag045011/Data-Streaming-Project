@@ -1,10 +1,13 @@
-# Data Streaming Project: Generating, Transforming, and Analyzing Game Data
----
+
+# Data Pipelining and Real-Time Data Streaming with Apache Flink and Flink SQL
 
 ## Objective
-
-The primary goal of this project is to demonstrate how to generate and process data using **Confluent schemas** and stream it into **multiple Kafka topics**. The data is then ingested, transformed, and stored in Elasticsearch for visualization in Kibana. This project builds a pipeline for real-time data streaming, enrichment, and dashboard creation to analyze the performance of players and game rooms in a gaming environment.
-
+This project demonstrates a comprehensive pipeline to handle streaming data by integrating Confluent schemas, Kafka topics, Apache Flink, and Elasticsearch. The primary goal is to:  
+- Generate and process data using **Confluent schemas**.  
+- Feed the processed data into multiple **Kafka topics**.  
+- Stream and analyze the data in real-time using **Apache Flink** and **Flink SQL**.  
+- Create a dashboard for visualization and derive insights using **Kibana**.
+  
 ---
 
 ## Dataset Description
@@ -82,8 +85,9 @@ Three datasets were generated from **Confluent Avro schemas** and subsequently t
    - `gen_sample.sh`: Streams transformed JSON data to Kafka topics.  
    - Kafka topics created: `bda1`, `bda2`, `bda3`.
 
-### 4. **Stream Processing with SQL**  
-   KSQL queries were used to enrich the data by performing joins between the Kafka topics:
+### 4. Real-Time Analysis with Apache Flink
+Apache Flink and Flink SQL were utilized to perform real-time streaming analysis:
+1. **Table Creation**: Tables were created in Flink SQL for each Kafka topic, specifying the schema and data format.
 
    - **Game Rooms Table**  
      ```sql
@@ -166,9 +170,12 @@ Three datasets were generated from **Confluent Avro schemas** and subsequently t
    );
    ```
 
+### 5. **Dashboard Creation with Kibana**
+   The data was visualized using Kibana by creating an index (`player_game_dashboard`) and designing a detailed dashboard.
+   
 ---
 
-## Dashboard Analysis
+# Dashboard Analysis
 
 ![Docker_Flink](https://github.com/user-attachments/assets/12c2099b-31aa-4b02-b07f-e317c3fc5346)
 
