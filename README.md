@@ -56,102 +56,122 @@ Three datasets were generated from **Confluent Avro schemas** and subsequently t
 
 ---
 
-## Data Pipeline Process
+## **Data Pipeline Process**
 
-### 1. **Data Generation**  
-   Data was generated from Confluent Avro schemas using the following commands:  
-   ```bash
-   ./gendata.sh gaming_games.avro xyz1.json 10000
-   ./gendata.sh gaming_player_activity.avro xyz2.json 10000
-   ./gendata.sh gaming_players.avro xyz3.json 10000
+---
+
+### **1. Data Generation**  
+Data was generated from Confluent Avro schemas using the following commands:  
+```bash
+./gendata.sh gaming_games.avro xyz1.json 10000
+./gendata.sh gaming_player_activity.avro xyz2.json 10000
+./gendata.sh gaming_players.avro xyz3.json 10000
+```
+- **`gendata.sh`**: Extracts data from the Avro schema and converts it to JSON.  
+- **Input**: Avro schema.  
+- **Output**: JSON file with random synthetic data.
+
+---
+
+### **2. Data Transformation**  
+The JSON files were transformed into key-value pairs using the **`convert.py`** script to prepare them for Kafka ingestion:  
+```bash
+python $HOME/Documents/fake/convert.py
+```
+
+---
+
+### **3. Kafka Ingestion**  
+Data from the JSON files was streamed into Kafka topics using **`gen_sample.sh`**:  
+```bash
+./gen_sample.sh /home/ashok/Documents/gendata/rev_xyz1.json | kafkacat -b localhost:9092 -t bda1 -K: -P
+./gen_sample.sh /home/ashok/Documents/gendata/rev_xyz2.json | kafkacat -b localhost:9092 -t bda2 -K: -P
+./gen_sample.sh /home/ashok/Documents/gendata/rev_xyz3.json | kafkacat -b localhost:9092 -t bda3 -K: -P
+```
+- **`gen_sample.sh`**: Streams transformed JSON data to Kafka topics.  
+- **Kafka Topics Created**: `bda1`, `bda2`, `bda3`.
+
+---
+
+### **4. Real-Time Analysis with Apache Flink**  
+Apache Flink and Flink SQL were used for real-time streaming analysis.  
+
+#### **Table Creation in Flink SQL:**
+1. **Game Rooms Table**  
+   ```sql
+   CREATE TABLE game_rooms (
+       id BIGINT,
+       room_name STRING,
+       created_date TIMESTAMP(3),
+       readable_created_date AS TO_TIMESTAMP(FROM_UNIXTIME(UNIX_TIMESTAMP(created_date))),
+       WATERMARK FOR created_date AS created_date - INTERVAL '5' SECOND
+   ) WITH (
+       'connector' = 'kafka',
+       'topic' = 'bda1',
+       'scan.startup.mode' = 'earliest-offset',
+       'properties.bootstrap.servers' = 'kafka:9094',
+       'format' = 'json',
+       'json.timestamp-format.standard' = 'ISO-8601'
+   );
    ```
-   - `gendata.sh`: Extracts data from the Avro schema and converts it to JSON.  
-   - Input: Avro schema.  
-   - Output: JSON file with random synthetic data.
 
-### 2. **Data Transformation**  
-   The JSON files were transformed into key-value pairs using the `convert.py` script to prepare them for Kafka ingestion:  
-   ```bash
-   python $HOME/Documents/fake/convert.py
+2. **Player Activity Table**  
+   ```sql
+   CREATE TABLE player_activity (
+       player_id BIGINT,
+       game_room_id BIGINT,
+       points INT,
+       coordinates STRING
+   ) WITH (
+       'connector' = 'kafka',
+       'topic' = 'bda2',
+       'scan.startup.mode' = 'earliest-offset',
+       'properties.bootstrap.servers' = 'kafka:9094',
+       'format' = 'json'
+   );
    ```
 
-### 3. **Kafka Ingestion**  
-   Data from JSON files was streamed into Kafka topics using `gen_sample.sh`:  
-   ```bash
-   ./gen_sample.sh /home/ashok/Documents/gendata/rev_xyz1.json | kafkacat -b localhost:9092 -t bda1 -K: -P
-   ./gen_sample.sh /home/ashok/Documents/gendata/rev_xyz2.json | kafkacat -b localhost:9092 -t bda2 -K: -P
-   ./gen_sample.sh /home/ashok/Documents/gendata/rev_xyz3.json | kafkacat -b localhost:9092 -t bda3 -K: -P
+3. **Players Table**  
+   ```sql
+   CREATE TABLE players (
+       player_id BIGINT,
+       player_name STRING,
+       ip STRING
+   ) WITH (
+       'connector' = 'kafka',
+       'topic' = 'bda3',
+       'scan.startup.mode' = 'earliest-offset',
+       'properties.bootstrap.servers' = 'kafka:9094',
+       'format' = 'json',
+       'json.timestamp-format.standard' = 'ISO-8601'
+   );
    ```
-   - `gen_sample.sh`: Streams transformed JSON data to Kafka topics.  
-   - Kafka topics created: `bda1`, `bda2`, `bda3`.
 
-### 4. Real-Time Analysis with Apache Flink
-Apache Flink and Flink SQL were utilized to perform real-time streaming analysis:
-1. **Table Creation**: Tables were created in Flink SQL for each Kafka topic, specifying the schema and data format.
+4. **Enriched Views**  
+   A consolidated view was created by joining **`player_activity`**, **`game_rooms`**, and **`players`**:  
+   ```sql
+   CREATE VIEW enriched_player_game_activity AS
+   SELECT 
+       PA.player_id,
+       P.player_name,
+       P.ip,
+       PA.game_room_id,
+       GR.room_name,
+       GR.created_date,
+       PA.points,
+       PA.coordinates
+   FROM player_activity AS PA
+   LEFT JOIN game_rooms AS GR ON PA.game_room_id = GR.id
+   LEFT JOIN players AS P ON PA.player_id = P.player_id;
+   ```
 
-   - **Game Rooms Table**  
-     ```sql
-     CREATE TABLE game_rooms (
-         id BIGINT,
-         room_name STRING,
-         created_date TIMESTAMP(3),
-         WATERMARK FOR created_date AS created_date - INTERVAL '5' SECOND
-     ) WITH (
-         'connector' = 'kafka',
-         'topic' = 'bda1',
-         'format' = 'json'
-     );
-     ```
+---
 
-   - **Player Activity Table**  
-     ```sql
-     CREATE TABLE player_activity (
-         player_id BIGINT,
-         game_room_id BIGINT,
-         points INT,
-         coordinates STRING
-     ) WITH (
-         'connector' = 'kafka',
-         'topic' = 'bda2',
-         'format' = 'json'
-     );
-     ```
+### **5. Data Insertion into Elasticsearch**  
+Before creating the Kibana dashboard, the enriched data was inserted into an Elasticsearch index.
 
-   - **Players Table**  
-     ```sql
-     CREATE TABLE players (
-         player_id BIGINT,
-         player_name STRING,
-         ip STRING
-     ) WITH (
-         'connector' = 'kafka',
-         'topic' = 'bda3',
-         'format' = 'json'
-     );
-     ```
-
-   - **Enriched Views**  
-     Player activity was joined with game rooms and players to create a consolidated view:  
-     ```sql
-     CREATE VIEW enriched_player_game_activity AS
-     SELECT 
-         PA.player_id,
-         P.player_name,
-         P.ip,
-         PA.game_room_id,
-         GR.room_name,
-         GR.created_date,
-         PA.points,
-         PA.coordinates
-     FROM player_activity AS PA
-     LEFT JOIN game_rooms AS GR
-         ON PA.game_room_id = GR.id
-     LEFT JOIN players AS P
-         ON PA.player_id = P.player_id;
-     ```
-
-### 5. **Data Ingestion into Elasticsearch**  
-   The enriched data was stored in an Elasticsearch index for visualization:  
+#### **Data Insertion into Elasticsearch:**
+1. **Elasticsearch Table Creation**  
    ```sql
    CREATE TABLE player_game_dashboard (
        player_id BIGINT,
@@ -170,10 +190,29 @@ Apache Flink and Flink SQL were utilized to perform real-time streaming analysis
    );
    ```
 
-### 5. **Dashboard Creation with Kibana**
-   The data was visualized using Kibana by creating an index (`player_game_dashboard`) and designing a detailed dashboard.
-   
+2. **Inserting Data into Elasticsearch Index**  
+   The data from the **`enriched_player_game_activity`** view was inserted into the **`player_game_dashboard`** table:  
+   ```sql
+   INSERT INTO player_game_dashboard
+   SELECT 
+       player_id,
+       player_name,
+       ip,
+       game_room_id,
+       room_name,
+       created_date,
+       points,
+       coordinates
+   FROM enriched_player_game_activity;
+   ```
+
 ---
+
+### **6. Dashboard Creation with Kibana**  
+The data in the **`player_game_dashboard`** index was visualized using Kibana.  
+- An index pattern for **`player_game_dashboard`** was created in Kibana.  
+- A detailed dashboard was designed to display player activity, game room details, and points scored.  
+
 
 # Dashboard Analysis
 
